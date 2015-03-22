@@ -1,0 +1,126 @@
+---
+title: "Practical Machine Learning Course Project"
+output: html_document
+---
+
+The purpose of this document is to use the Weight Lifting Exercises Dataset created by Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. to create a model that can correctly predict which of 5 different type of bicep curl is being performed by a subject. 
+
+First we load the required packages & dataset.
+```{r message = FALSE}
+library(caret)
+library(rpart)
+library(randomForest)
+setwd("~/datascience")
+train<-read.csv("pml-training.csv")
+```
+
+###Partition into training & pretest sets 
+####(70:30 split)
+```{r}
+set.seed(1)
+inTrain <- createDataPartition(y = train$classe, p = 0.7, list=FALSE)
+training<-train[inTrain,]
+testing<-train[-inTrain,]
+```
+
+Having split the data we need reduce the number of variable over which we will fit the model. 
+There are three areas that can be considered initially 
+1. Variables which contain information that is not relevant.
+2. Variables with zero/low variance
+3. Variables with large numbers of missing values.
+
+###Transformation 1: 
+####Drop first 7 columns
+This step is very important. Whilst much better apparent fit models can be achieved by leaving the time information in the data, this should result in overfitting & large out of sample error rates. Likewise, the identity of the test subject would also have an impact on the model fit. Therefore these variables have been excluded
+```{r}
+training1excl<-training[,1:7]
+training1<-training[,7:160]
+```
+
+###Transformation 2: 
+####Remove variables with zero variance
+the function nearZeroVar produces the column references of the variables with <5% unique values.
+```{r}
+nzVars<-nearZeroVar(training1,saveMetrics=FALSE)
+training2<-training1[,-nzVars]
+```
+
+###Transformation 3: 
+####Remove variables with large numbers of missing values (>70%)
+
+```{r}
+r<-nrow(training2)
+thresh<-0.70
+NAthresh<-r*thresh
+NAindex <- apply(training2,2,function(x) {sum(is.na(x))}) 
+training3<- training2[,which(NAindex<NAthresh)]
+```
+
+After transformation we are left with the following size of data to train the model on.
+```{r}
+dim(training3)
+```
+
+
+###The first model fit is a decision tree
+```{r}
+modDTree <- rpart(classe ~ ., data=training3, method="class")
+
+predictionDTree<-predict(modDTree,training,type="class")
+cm<-confusionMatrix(predictionDTree,training$classe)
+TreeInSmplEr<-(sum(cm$table)-sum(diag(cm$table)))/sum(cm$table)
+
+
+predictionDTree<-predict(modDTree,testing,type="class")
+cm<-confusionMatrix(predictionDTree,testing$classe)
+TreeOutSmplEr<-(sum(cm$table)-sum(diag(cm$table)))/sum(cm$table)
+
+cm
+TreeInSmplEr
+TreeOutSmplEr
+```
+The decision tree model does not fare terribly well, with an accuracy of only 74% and sensitivities ranging from 60-90%.
+
+We can see as expected the in sample error rate is lower than the "out" of sample error rate calculated. The out of sample error rate calculated here may also be lower than the true out of sample rate since the underlying data is from the same data set, simply partitioned.  
+
+###The second model fit is random forest
+```{r}
+modRForest <- randomForest(classe ~ ., data=training3)
+
+predictionRForest<-predict(modRForest,training,type="class")
+cmIn<-confusionMatrix(predictionRForest,training$classe)
+ForestInSmplEr<-(sum(cm$table)-sum(diag(cm$table)))/sum(cm$table)
+
+predictionRForest<-predict(modRForest,testing,type="class")
+cmOut<-confusionMatrix(predictionRForest,testing$classe)
+ForestOutSmplEr<-(sum(cm$table)-sum(diag(cm$table)))/sum(cm$table)
+
+cm
+ForestInSmplEr
+ForestOutSmplEr
+
+```
+The Forest model performs significantly better with an accuracy of 99.8% and all class sensitivity & specificity above 99%. 
+
+The in and out of sample error rates for the random forest model are the same, indicating that the model has not been overfit. However as with the decision tree model the out of sample test here is performed using the same data set simply partitioned, which may lead to underestimates of the true error rate. 
+
+###Predictions against test data
+```{r}
+test<-read.csv("pml-testing.csv")
+predictionRForestTest<-predict(modRForest,test,type="class")
+answers<-as.character(predictionRForestTest)
+answers
+```
+
+Then use the code provided to generate submission files
+```{r}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(answers)
+```
